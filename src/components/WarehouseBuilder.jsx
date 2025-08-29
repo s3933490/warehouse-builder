@@ -12,7 +12,6 @@ import {
   Upload,
   Grid3X3,
   Eye,
-  EyeOff,
   Move,
 } from "lucide-react";
 import "../styles/WarehouseBuilder.css";
@@ -40,7 +39,6 @@ const WarehouseBuilder = () => {
   const [editValues, setEditValues] = useState({});
 
   // View options
-  const [showBayDetails, setShowBayDetails] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
 
@@ -52,6 +50,73 @@ const WarehouseBuilder = () => {
     depth: 1200,
     defaultBaysHigh: 5,
   });
+
+  // Helper function to check if drop position is valid
+  const isValidDropPosition = useCallback(
+    (row, col) => {
+      if (!draggingAisle) return false;
+
+      // Check bounds
+      if (
+        row < 0 ||
+        col < 0 ||
+        row + draggingAisle.height > gridSize.rows ||
+        col + draggingAisle.width > gridSize.cols
+      ) {
+        return false;
+      }
+
+      // Check overlap with other aisles
+      const wouldOverlap = Object.values(placedAisles).some((aisle) => {
+        if (aisle.id === draggingAisle.id) return false;
+
+        const aisleEndRow = aisle.gridRow + aisle.height;
+        const aisleEndCol = aisle.gridCol + aisle.width;
+        const newEndRow = row + draggingAisle.height;
+        const newEndCol = col + draggingAisle.width;
+
+        return !(
+          row >= aisleEndRow ||
+          newEndRow <= aisle.gridRow ||
+          col >= aisleEndCol ||
+          newEndCol <= aisle.gridCol
+        );
+      });
+
+      return !wouldOverlap;
+    },
+    [draggingAisle, gridSize, placedAisles]
+  );
+
+  // Generate color for aisle based on ID
+  const generateAisleColor = useCallback((id) => {
+    const colors = [
+      "#4CAF50",
+      "#2196F3",
+      "#FF9800",
+      "#9C27B0",
+      "#F44336",
+      "#00BCD4",
+      "#8BC34A",
+      "#FF5722",
+    ];
+    return colors[(id - 1) % colors.length];
+  }, []);
+
+  // Utility functions
+  const getAisleAtPosition = useCallback(
+    (row, col) => {
+      return Object.values(placedAisles).find((aisle) => {
+        return (
+          row >= aisle.gridRow &&
+          row < aisle.gridRow + aisle.height &&
+          col >= aisle.gridCol &&
+          col < aisle.gridCol + aisle.width
+        );
+      });
+    },
+    [placedAisles]
+  );
 
   // Start drawing mode
   const startDrawing = useCallback(() => {
@@ -91,61 +156,49 @@ const WarehouseBuilder = () => {
   const handleGridClick = useCallback(
     (row, col) => {
       if (dragMode) {
-        const aisle = getAisleAtPosition(row, col);
-        if (aisle && !draggingAisle) {
-          // Start dragging this aisle
-          setDraggingAisle(aisle);
-          setDragOffset({
-            row: row - aisle.gridRow,
-            col: col - aisle.gridCol,
-          });
+        if (!draggingAisle) {
+          // Try to start dragging an aisle at this position
+          const aisle = getAisleAtPosition(row, col);
+          if (aisle) {
+            setDraggingAisle(aisle);
+            setDragOffset({
+              row: row - aisle.gridRow,
+              col: col - aisle.gridCol,
+            });
+            setDragPreview({
+              row: aisle.gridRow,
+              col: aisle.gridCol,
+              width: aisle.width,
+              height: aisle.height,
+            });
+          }
           return;
-        }
+        } else {
+          // We're dragging an aisle, try to drop it
+          const targetRow = row - dragOffset.row;
+          const targetCol = col - dragOffset.col;
 
-        if (draggingAisle && dragPreview) {
-          // Drop the aisle
-          const newRow = dragPreview.row;
-          const newCol = dragPreview.col;
-
-          // Check if drop position is valid
-          const wouldOverlap = Object.values(placedAisles).some(
-            (existingAisle) => {
-              if (existingAisle.id === draggingAisle.id) return false;
-
-              const aisleEndRow = existingAisle.gridRow + existingAisle.height;
-              const aisleEndCol = existingAisle.gridCol + existingAisle.width;
-              const newEndRow = newRow + draggingAisle.height;
-              const newEndCol = newCol + draggingAisle.width;
-
-              return !(
-                newRow >= aisleEndRow ||
-                newEndRow <= existingAisle.gridRow ||
-                newCol >= aisleEndCol ||
-                newEndCol <= existingAisle.gridCol
-              );
-            }
-          );
-
-          if (
-            !wouldOverlap &&
-            newRow >= 0 &&
-            newCol >= 0 &&
-            newRow + draggingAisle.height <= gridSize.rows &&
-            newCol + draggingAisle.width <= gridSize.cols
-          ) {
+          // Validate the drop position
+          if (isValidDropPosition(targetRow, targetCol)) {
             // Update aisle position
             setPlacedAisles((prev) => ({
               ...prev,
               [draggingAisle.id]: {
                 ...prev[draggingAisle.id],
-                gridRow: newRow,
-                gridCol: newCol,
+                gridRow: targetRow,
+                gridCol: targetCol,
               },
             }));
+          } else {
+            alert(
+              "Cannot drop aisle here - invalid position or would overlap!"
+            );
           }
 
+          // Reset drag state
           setDraggingAisle(null);
           setDragPreview(null);
+          setDragOffset({ row: 0, col: 0 });
         }
         return;
       }
@@ -235,25 +288,13 @@ const WarehouseBuilder = () => {
       formData.zone,
       cancelDrawing,
       draggingAisle,
-      dragPreview,
+      dragOffset,
       gridSize,
+      generateAisleColor,
+      getAisleAtPosition,
+      isValidDropPosition,
     ]
   );
-
-  // Generate color for aisle based on ID
-  const generateAisleColor = useCallback((id) => {
-    const colors = [
-      "#4CAF50",
-      "#2196F3",
-      "#FF9800",
-      "#9C27B0",
-      "#F44336",
-      "#00BCD4",
-      "#8BC34A",
-      "#FF5722",
-    ];
-    return colors[(id - 1) % colors.length];
-  }, []);
 
   // Handle grid mouse move for preview
   const handleGridMouseMove = useCallback(
@@ -286,28 +327,27 @@ const WarehouseBuilder = () => {
       }
 
       if (dragMode && draggingAisle) {
-        const newRow = row - dragOffset.row;
-        const newCol = col - dragOffset.col;
+        const targetRow = row - dragOffset.row;
+        const targetCol = col - dragOffset.col;
 
-        // Check if position is valid
-        if (
-          newRow >= 0 &&
-          newCol >= 0 &&
-          newRow + draggingAisle.height <= gridSize.rows &&
-          newCol + draggingAisle.width <= gridSize.cols
-        ) {
-          setDragPreview({
-            row: newRow,
-            col: newCol,
-            width: draggingAisle.width,
-            height: draggingAisle.height,
-          });
-        } else {
-          setDragPreview(null);
-        }
+        // Always show preview, even if invalid
+        setDragPreview({
+          row: targetRow,
+          col: targetCol,
+          width: draggingAisle.width,
+          height: draggingAisle.height,
+          valid: isValidDropPosition(targetRow, targetCol),
+        });
       }
     },
-    [drawingMode, startPoint, dragMode, draggingAisle, dragOffset, gridSize]
+    [
+      drawingMode,
+      startPoint,
+      dragMode,
+      draggingAisle,
+      dragOffset,
+      isValidDropPosition,
+    ]
   );
 
   // Start editing aisle
@@ -585,7 +625,6 @@ const WarehouseBuilder = () => {
     [gridSize, placedAisles]
   );
 
-  // Utility functions
   const isGridPositionOccupied = useCallback(
     (row, col) => {
       return Object.values(placedAisles).some((aisle) => {
@@ -601,20 +640,6 @@ const WarehouseBuilder = () => {
       });
     },
     [placedAisles, draggingAisle]
-  );
-
-  const getAisleAtPosition = useCallback(
-    (row, col) => {
-      return Object.values(placedAisles).find((aisle) => {
-        return (
-          row >= aisle.gridRow &&
-          row < aisle.gridRow + aisle.height &&
-          col >= aisle.gridCol &&
-          col < aisle.gridCol + aisle.width
-        );
-      });
-    },
-    [placedAisles]
   );
 
   const isInPreviewArea = useCallback(
@@ -688,7 +713,7 @@ const WarehouseBuilder = () => {
                 : dragMode
                 ? `${
                     draggingAisle
-                      ? "Click to drop aisle at new position"
+                      ? `Dragging ${formData.zone}${draggingAisle.number} - Click to drop`
                       : "Click any aisle to start dragging"
                   }`
                 : "Choose a tool to create or move aisles"}
@@ -745,7 +770,7 @@ const WarehouseBuilder = () => {
             </div>
           </div>
 
-          {/* View Options - Fixed to only show working options */}
+          {/* View Options */}
           <div className="tool-section">
             <h4>View Options</h4>
             <div className="view-controls">
@@ -948,11 +973,6 @@ const WarehouseBuilder = () => {
                               aisle.gridRow + aisle.height - 1
                             } C${aisle.gridCol}`}
                       </span>
-                      {showBayDetails && (
-                        <span className="bay-count">
-                          Total Bays: {aisle.sections * aisle.baysHigh}
-                        </span>
-                      )}
                     </div>
 
                     {editingAisle === aisle.id ? (
@@ -1055,7 +1075,7 @@ const WarehouseBuilder = () => {
               : dragMode
               ? `Drag Mode - ${
                   draggingAisle
-                    ? "Click to drop aisle"
+                    ? `Dragging ${formData.zone}${draggingAisle.number} - Click to drop`
                     : "Click any aisle to start dragging"
                 }`
               : `Grid: ${gridSize.rows} × ${gridSize.cols} - Select a tool above to begin`}
@@ -1114,8 +1134,7 @@ const WarehouseBuilder = () => {
                       backgroundColor: isDraggingThis
                         ? "transparent"
                         : inDragPreview
-                        ? dragPreview &&
-                          isValidDropPosition(dragPreview.row, dragPreview.col)
+                        ? dragPreview?.valid !== false
                           ? "#4CAF5080"
                           : "#F4433680"
                         : aisle && !isDraggingThis
@@ -1124,7 +1143,9 @@ const WarehouseBuilder = () => {
                       cursor: drawingMode
                         ? "crosshair"
                         : dragMode
-                        ? "grab"
+                        ? draggingAisle
+                          ? "grabbing"
+                          : "grab"
                         : "default",
                       border: "1px solid #ddd",
                       minHeight: "20px",
@@ -1165,10 +1186,24 @@ const WarehouseBuilder = () => {
                             fontWeight: "bold",
                             zIndex: 2,
                             cursor: dragMode ? "grab" : "pointer",
+                            pointerEvents: "auto",
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!dragMode) {
+                            if (dragMode) {
+                              // Start dragging this aisle
+                              setDraggingAisle(aisle);
+                              setDragOffset({
+                                row: 0, // Since we clicked on the aisle itself, offset is 0
+                                col: 0,
+                              });
+                              setDragPreview({
+                                row: aisle.gridRow,
+                                col: aisle.gridCol,
+                                width: aisle.width,
+                                height: aisle.height,
+                              });
+                            } else {
                               setSelectedAisle(
                                 aisle.id === selectedAisle ? null : aisle.id
                               );
@@ -1182,6 +1217,7 @@ const WarehouseBuilder = () => {
                                 style={{
                                   color: "#000",
                                   textShadow: "1px 1px 1px #fff",
+                                  pointerEvents: "none", // Prevent label from blocking clicks
                                 }}
                               >
                                 {formData.zone}
@@ -1193,6 +1229,7 @@ const WarehouseBuilder = () => {
                                   color: "#000",
                                   textShadow: "1px 1px 1px #fff",
                                   fontSize: "8px",
+                                  pointerEvents: "none", // Prevent label from blocking clicks
                                 }}
                               >
                                 {aisle.orientation === "horizontal"
@@ -1215,17 +1252,12 @@ const WarehouseBuilder = () => {
                         <div
                           className="drag-preview-aisle"
                           style={{
-                            backgroundColor: isValidDropPosition(
-                              dragPreview.row,
-                              dragPreview.col
-                            )
-                              ? "#4CAF5060"
-                              : "#F4433660",
+                            backgroundColor:
+                              dragPreview.valid !== false
+                                ? "#4CAF5060"
+                                : "#F4433660",
                             border: `2px dashed ${
-                              isValidDropPosition(
-                                dragPreview.row,
-                                dragPreview.col
-                              )
+                              dragPreview.valid !== false
                                 ? "#4CAF50"
                                 : "#F44336"
                             }`,
@@ -1255,40 +1287,6 @@ const WarehouseBuilder = () => {
       </div>
     </div>
   );
-
-  // Helper function to check if drop position is valid
-  function isValidDropPosition(row, col) {
-    if (!draggingAisle) return false;
-
-    // Check bounds
-    if (
-      row < 0 ||
-      col < 0 ||
-      row + draggingAisle.height > gridSize.rows ||
-      col + draggingAisle.width > gridSize.cols
-    ) {
-      return false;
-    }
-
-    // Check overlap with other aisles
-    const wouldOverlap = Object.values(placedAisles).some((aisle) => {
-      if (aisle.id === draggingAisle.id) return false;
-
-      const aisleEndRow = aisle.gridRow + aisle.height;
-      const aisleEndCol = aisle.gridCol + aisle.width;
-      const newEndRow = row + draggingAisle.height;
-      const newEndCol = col + draggingAisle.width;
-
-      return !(
-        row >= aisleEndRow ||
-        newEndRow <= aisle.gridRow ||
-        col >= aisleEndCol ||
-        newEndCol <= aisle.gridCol
-      );
-    });
-
-    return !wouldOverlap;
-  }
 };
 
 export default WarehouseBuilder;
